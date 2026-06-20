@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.backup.ts
+decompiler_backup*.ts
+apply-*.js
+create_zip.ts
+debug*.ts
+test*.ts
+compile_all_targets.ts

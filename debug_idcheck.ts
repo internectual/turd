@@ -1,0 +1,54 @@
+import { Compiler } from './src/compiler/index';
+import * as fs from 'fs';
+
+const c = new Compiler('TGE10');
+const code = fs.readFileSync('/home/methodown/t2-linux/console_start.cs', 'utf8');
+const b = c.compile(code);
+
+const view = new DataView(b.buffer);
+let pos = 0;
+view.getUint32(pos, true); pos += 4; // version
+const globalStrLen = view.getUint32(pos, true); pos += 4;
+pos += globalStrLen;
+const globalFloatCount = view.getUint32(pos, true); pos += 4;
+pos += globalFloatCount * 8;
+const funcStrLen = view.getUint32(pos, true); pos += 4;
+pos += funcStrLen;
+const funcFloatCount = view.getUint32(pos, true); pos += 4;
+pos += funcFloatCount * 8;
+const codeSize = view.getUint32(pos, true); pos += 4;
+const lineBreaks = view.getUint32(pos, true); pos += 4;
+
+// Read identifier table
+const lbEnd = pos + codeSize + lineBreaks * 2 * 4;
+const idCount = view.getUint32(lbEnd, true);
+let idPositions = new Set<number>();
+let idPos = lbEnd + 4;
+for (let i = 0; i < idCount; i++) {
+  const strIdx = view.getUint32(idPos, true); idPos += 4;
+  const count = view.getUint32(idPos, true); idPos += 4;
+  for (let j = 0; j < count; j++) {
+    const ip = view.getUint32(idPos, true); idPos += 4;
+    idPositions.add(ip);
+  }
+}
+
+// Check first 10 invalid opcodes
+let invalidOps: {ip: number, val: number}[] = [];
+let codePos = pos;
+for (let i = 0; i < codeSize && invalidOps.length < 20; i++) {
+  const byte = view.getUint8(codePos);
+  codePos++;
+  if (byte === 0xFF) {
+    const val = view.getUint32(codePos, true);
+    codePos += 4;
+    if (val > 83) invalidOps.push({ip: i, val});
+  } else if (byte > 83) {
+    invalidOps.push({ip: i, val: byte});
+  }
+}
+
+console.log('Identifier table positions:', idPositions.size);
+for (const op of invalidOps) {
+  console.log('  ip=' + op.ip + ' val=' + op.val + ' inIdTable=' + idPositions.has(op.ip));
+}
