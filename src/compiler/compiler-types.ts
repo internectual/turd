@@ -27,9 +27,11 @@ export class StringTable {
 export class IdentTable {
   identMap: Map<number, number[]> = new Map();
   ipToIdentMap: Map<number, string> = new Map();
+  globalStringTable?: StringTable;
 
   add(strTable: StringTable, ident: string, ip: number): void {
-    const index = strTable.add(ident, false, false);
+    const targetTable = this.globalStringTable ?? strTable;
+    const index = targetTable.add(ident, false, false);
     if (this.identMap.has(index)) {
       this.identMap.get(index)!.push(ip);
     } else {

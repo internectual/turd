@@ -20,24 +20,20 @@ for (const file of files) {
     console.log(`File size: ${buffer.length} bytes`);
 
     // Try with Tribes 2 engine
-    const result = decompile(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength), 'Tribes2');
+    const result = decompile(new Uint8Array(buffer));
 
-    if (result.success) {
-      console.log(`SUCCESS! Output length: ${result.output.length} chars`);
-      console.log(`Engine: ${result.engineName}`);
-      if (result.debug) {
-        console.log(`Debug: version=${result.debug.version}, codeEntries=${result.debug.codeEntries}, lineBreaks=${result.debug.lineBreaksCount}`);
+    if (result.ok && result.source !== undefined) {
+      console.log(`SUCCESS! Output length: ${result.source.length} chars`);
+      if (result.stats) {
+        console.log(`Stats: instructions=${result.stats.instructionCount}, codeSize=${result.stats.codeSize}`);
       }
       // Write output
-      writeFileSync(`/tmp/${name}.decompiled.cs`, result.output);
+      writeFileSync(`/tmp/${name}.decompiled.cs`, result.source);
       console.log(`Output written to /tmp/${name}.decompiled.cs`);
       // Show first 500 chars
-      console.log(`\nFirst 500 chars of output:\n${result.output.substring(0, 500)}`);
+      console.log(`\nFirst 500 chars of output:\n${result.source.substring(0, 500)}`);
     } else {
       console.log(`FAILED: ${result.error}`);
-      if (result.debug) {
-        console.log(`Debug: ${JSON.stringify(result.debug, null, 2)}`);
-      }
     }
   } catch (e: any) {
     console.log(`EXCEPTION: ${e.message}`);

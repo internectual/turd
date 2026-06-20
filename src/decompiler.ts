@@ -1928,7 +1928,10 @@ export function decompile(bytes: Uint8Array): DecompileResult {
       stats: { instructionCount: disasm.list.length, codeSize: data.code.length },
     };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message + ' at ' + (e.stack?.split('\n')[1]?.trim() ?? '') : String(e),
+    };
   }
 }
 
@@ -2022,7 +2025,10 @@ export function disassembleText(bytes: Uint8Array): DisassembleTextResult {
     }
     return { ok: true, text: lines.join("\n") };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message + ' at ' + (e.stack?.split('\n')[1]?.trim() ?? '') : String(e),
+    };
   }
 }
 

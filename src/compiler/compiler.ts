@@ -131,7 +131,6 @@ export class Compiler {
   private inFunction = false;
   private breakLineCount = 0;
   private dsoVersion: number;
-  private counting = false;
 
   constructor(targetId: string = 'TGE10') {
     this.ops = OPS_MAPS[targetId] || OPS_MAPS['TGE10'];
@@ -146,10 +145,7 @@ export class Compiler {
 
   private getOpcodeValue(opCode: OpCode): number {
     const tagName = opcodeNameMap[opCode];
-    if (!tagName || !(tagName in this.ops.values)) {
-  
-      return this.ops.invalid;
-    }
+    if (!tagName || !(tagName in this.ops.values)) return this.ops.invalid;
     return this.ops.values[tagName];
   }
 
@@ -172,27 +168,140 @@ export class Compiler {
     this.inFunction = false;
     this.breakLineCount = 0;
 
-    // Pass 1: count slots (no state modifications)
-    this.counting = true;
-    this.globalStringTable.counting = true;
-    this.functionStringTable.counting = true;
-    const countCtx = new CompileContext(200000, 200000);
-    this.compileBlock(countCtx, stmts);
-    const codeSize = countCtx.ip + 1;
+    const codeSize = this.precompileBlock(stmts, 0) + 1;
     const breakCount = this.breakLineCount;
     const lineBreakPairCount = breakCount * 2;
+    // Allocate extra space since precompile may under-count
+    const context = new CompileContext(codeSize * 2 + 100, lineBreakPairCount * 2 + 100);
 
-    // Pass 2: emit bytecode
-    this.counting = false;
-    this.globalStringTable.counting = false;
-    this.functionStringTable.counting = false;
-    this.identTable.reset();
-    const context = new CompileContext(codeSize, lineBreakPairCount);
     this.breakLineCount = 0;
     if (stmts.length > 0) this.compileBlock(context, stmts);
-    this.emit(context, this.getOpcodeValue(OpCode.Return));
+    context.codeStream[context.ip++] = this.getOpcodeValue(OpCode.Return);
 
-    return this.serialize(context, codeSize, lineBreakPairCount);
+    return this.serialize(context, context.ip, this.breakLineCount);
+  }
+
+  // --- Precompile pass ---
+  private precompileBlock(stmts: AST.Stmt[], loopCount: number): number {
+    let sum = 0;
+    for (const s of stmts) sum += this.precompileStmt(s, loopCount);
+    return sum;
+  }
+
+  private precompileStmt(stmt: AST.Stmt, loopCount: number): number {
+    if (stmt instanceof AST.ReturnStmt) {
+      this.breakLineCount++;
+      return 1 + (stmt.expr ? this.precompileExpr(stmt.expr, TypeReq.String) : 0);
+    }
+    if (stmt instanceof AST.BreakStmt) {
+      if (loopCount > 0) { this.breakLineCount++; return 2; }
+      return 0;
+    }
+    if (stmt instanceof AST.ContinueStmt) {
+      if (loopCount > 0) { this.breakLineCount++; return 2; }
+      return 0;
+    }
+    if (stmt instanceof AST.IfStmt) {
+      this.breakLineCount++;
+      const exprSize = this.precompileExpr(stmt.condition, TypeReq.Float);
+      const ifSize = this.precompileBlock(stmt.body, loopCount);
+      const elseSize = stmt.elseBody ? this.precompileBlock(stmt.elseBody, loopCount) : 0;
+      return exprSize + 2 + ifSize + (stmt.elseBody ? 2 + elseSize : 0);
+    }
+    if (stmt instanceof AST.LoopStmt) {
+      this.breakLineCount++;
+      const initSize = stmt.init ? this.precompileExpr(stmt.init, TypeReq.None) : 0;
+      const testSize = this.precompileExpr(stmt.condition, TypeReq.Float);
+      const blockSize = this.precompileBlock(stmt.body, loopCount + 1);
+      const endSize = stmt.end ? this.precompileExpr(stmt.end, TypeReq.None) : 0;
+      return initSize + testSize + 2 + blockSize + endSize + testSize + 2;
+    }
+    if (stmt instanceof AST.FunctionDeclStmt) {
+      this.breakLineCount++;
+      return this.precompileFunction(stmt);
+    }
+    this.breakLineCount++;
+    return this.precompileExpr(stmt as AST.Expr, TypeReq.None);
+  }
+
+  private precompileExpr(expr: AST.Expr, typeReq: TypeReq): number {
+    if (expr instanceof AST.IntExpr || expr instanceof AST.FloatExpr ||
+        expr instanceof AST.StringConstExpr || expr instanceof AST.ConstantExpr) {
+      return typeReq === TypeReq.None ? 0 : 2;
+    }
+    if (expr instanceof AST.FloatBinaryExpr) {
+      return this.precompileExpr(expr.left, TypeReq.Float) +
+             this.precompileExpr(expr.right, TypeReq.Float) + 1 +
+             (typeReq !== TypeReq.Float ? 1 : 0);
+    }
+    if (expr instanceof AST.IntBinaryExpr) {
+      return this.precompileExpr(expr.left, TypeReq.Int) +
+             this.precompileExpr(expr.right, TypeReq.Int) + 1 +
+             (typeReq !== TypeReq.Int ? 1 : 0);
+    }
+    if (expr instanceof AST.StrCatExpr) {
+      return this.precompileExpr(expr.left, TypeReq.String) +
+             this.precompileExpr(expr.right, TypeReq.String) + 2 +
+             (typeReq !== TypeReq.String ? 1 : 0);
+    }
+    if (expr instanceof AST.StrEqExpr) {
+      return this.precompileExpr(expr.left, TypeReq.String) +
+             this.precompileExpr(expr.right, TypeReq.String) + 2 +
+             (typeReq !== TypeReq.Int ? 1 : 0);
+    }
+    if (expr instanceof AST.VarExpr) {
+      return typeReq === TypeReq.None ? 0 : (expr.arrayIndex ? 6 : 3);
+    }
+    if (expr instanceof AST.AssignExpr) {
+      return this.precompileExpr(expr.expr, TypeReq.String) + 3;
+    }
+    if (expr instanceof AST.AssignOpExpr) {
+      return this.precompileExpr(expr.expr, TypeReq.Float) + 5;
+    }
+    if (expr instanceof AST.FuncCallExpr) {
+      let size = 5;
+      for (const arg of expr.args) size += this.precompileExpr(arg, TypeReq.String) + 1;
+      return size;
+    }
+    if (expr instanceof AST.SlotAccessExpr) {
+      return this.precompileExpr(expr.objectExpr, TypeReq.String) + 3 +
+             (expr.arrayExpr ? this.precompileExpr(expr.arrayExpr, TypeReq.String) + 3 : 0);
+    }
+    if (expr instanceof AST.SlotAssignExpr) {
+      return this.precompileExpr(expr.expr, TypeReq.String) + 5 +
+             (expr.arrayExpr ? this.precompileExpr(expr.arrayExpr, TypeReq.String) + 3 : 0) +
+             (expr.objectExpr ? this.precompileExpr(expr.objectExpr, TypeReq.String) : 0);
+    }
+    if (expr instanceof AST.ObjectDeclExpr) return this.precompileObjectDecl(expr);
+    if (expr instanceof AST.ParenthesisExpr) return this.precompileExpr(expr.expr, typeReq);
+    if (expr instanceof AST.IntUnaryExpr) return this.precompileExpr(expr.expr, TypeReq.Int) + 1 + (typeReq !== TypeReq.Int ? 1 : 0);
+    if (expr instanceof AST.FloatUnaryExpr) return this.precompileExpr(expr.expr, TypeReq.Float) + 1 + (typeReq !== TypeReq.Float ? 1 : 0);
+    if (expr instanceof AST.ConditionalExpr) {
+      return this.precompileExpr(expr.condition, TypeReq.Int) +
+             this.precompileExpr(expr.trueExpr, typeReq) +
+             this.precompileExpr(expr.falseExpr, typeReq) + 4;
+    }
+    return 0;
+  }
+
+  private precompileObjectDecl(expr: AST.ObjectDeclExpr): number {
+    let size = 10;
+    size += this.precompileExpr(expr.className, TypeReq.String) + 1;
+    size += this.precompileExpr(expr.objectNameExpr, TypeReq.String) + 1;
+    for (const arg of expr.args) size += this.precompileExpr(arg, TypeReq.String) + 1;
+    for (const slot of expr.slotDecls) size += this.precompileExpr(slot, TypeReq.None);
+    for (const sub of expr.subObjects) size += this.precompileObjectDecl(sub);
+    return size;
+  }
+
+  private precompileFunction(fn: AST.FunctionDeclStmt): number {
+    const prevS = this.currentStringTable, prevF = this.currentFloatTable;
+    this.currentStringTable = this.functionStringTable;
+    this.currentFloatTable = this.functionFloatTable;
+    const bodySize = this.precompileBlock(fn.stmts, 0);
+    this.currentStringTable = prevS;
+    this.currentFloatTable = prevF;
+    return 7 + fn.args.length + bodySize;
   }
 
   // --- Compile pass ---
@@ -223,11 +332,11 @@ export class Compiler {
   private compileIf(context: CompileContext, stmt: AST.IfStmt): void {
     this.compileExpr(context, stmt.condition, TypeReq.Float);
     this.emit(context, this.getOpcodeValue(OpCode.JmpIffNot));
-    const jmpIp = this.context_ip(context);
+    const jmpIp = context.ip++;
     this.compileBlock(context, stmt.body);
     if (stmt.elseBody) {
       this.emit(context, this.getOpcodeValue(OpCode.Jmp));
-      const endJmpIp = this.context_ip(context);
+      const endJmpIp = context.ip++;
       context.codeStream[jmpIp] = context.ip;
       this.compileBlock(context, stmt.elseBody);
       context.codeStream[endJmpIp] = context.ip;
@@ -241,7 +350,7 @@ export class Compiler {
     if (stmt.init) this.compileExpr(context, stmt.init, TypeReq.None);
     this.compileExpr(context, stmt.condition, TypeReq.Float);
     this.emit(context, this.getOpcodeValue(OpCode.JmpIffNot));
-    const breakJmpIp = this.context_ip(context);
+    const breakJmpIp = context.ip++;
     const savedBreak = context.breakPoint, savedCont = context.continuePoint;
     context.breakPoint = 0; context.continuePoint = 0;
     this.compileBlock(context, stmt.body);
@@ -260,17 +369,17 @@ export class Compiler {
     this.inFunction = true;
     const start = context.ip;
     this.emit(context, this.getOpcodeValue(OpCode.FuncDecl));
-    const nameIp = this.context_ip(context);
+    const nameIp = context.ip++;
     this.identTable.add(this.globalStringTable, fn.functionName.literal, nameIp);
-    const nsIp = this.context_ip(context);
+    const nsIp = context.ip++;
     if (fn.namespace) this.identTable.add(this.globalStringTable, fn.namespace.literal, nsIp);
-    const pkgIp = this.context_ip(context);
+    const pkgIp = context.ip++;
     if (fn.packageName) this.identTable.add(this.globalStringTable, fn.packageName.literal, pkgIp);
     this.emit(context, fn.stmts.length > 0 ? 1 : 0);
-    const endJmpIp = this.context_ip(context);
+    const endJmpIp = context.ip++;
     this.emit(context, fn.args.length);
     for (const arg of fn.args) {
-      const argIp = this.context_ip(context);
+      const argIp = context.ip++;
       this.identTable.add(this.globalStringTable, (arg.vtype === VarType.Global ? '$' : '%') + arg.name.literal, argIp);
     }
     const savedBreak = context.breakPoint, savedCont = context.continuePoint;
@@ -278,7 +387,7 @@ export class Compiler {
     this.compileBlock(context, fn.stmts);
     context.breakPoint = savedBreak; context.continuePoint = savedCont;
     this.emit(context, this.getOpcodeValue(OpCode.Return));
-    context.codeStream[endJmpIp] = context.ip;
+    context.codeStream[endJmpIp] = context.ip - 1;
     this.inFunction = false;
     this.currentStringTable = prevS;
     this.currentFloatTable = prevF;
@@ -300,7 +409,6 @@ export class Compiler {
     else if (expr instanceof AST.FuncCallExpr) this.compileFuncCall(context, expr, typeReq);
     else if (expr instanceof AST.SlotAccessExpr) this.compileSlotAccess(context, expr, typeReq);
     else if (expr instanceof AST.SlotAssignExpr) this.compileSlotAssign(context, expr, typeReq);
-    else if (expr instanceof AST.SlotAssignOpExpr) this.compileSlotAssignOp(context, expr, typeReq);
     else if (expr instanceof AST.ObjectDeclExpr) this.compileObjectDecl(context, expr, typeReq);
     else if (expr instanceof AST.ParenthesisExpr) this.compileExpr(context, expr.expr, typeReq);
     else if (expr instanceof AST.IntUnaryExpr) this.compileIntUnary(context, expr, typeReq);
@@ -406,13 +514,12 @@ export class Compiler {
     else if (sub === TypeReq.Int) this.emit(c, this.getOpcodeValue(OpCode.SaveVarUInt));
     else this.emit(c, this.getOpcodeValue(OpCode.SaveVarFlt));
     if (t !== sub) this.emit(c, this.getOpcodeValue(this.conversionOp(sub, t)));
+    c.ip++;
   }
 
-  private compileAssignOp(c: any, e: AST.AssignOpExpr, t: TypeReq): void {
+  private compileAssignOp(c: CompileContext, e: AST.AssignOpExpr, t: TypeReq): void {
     const { subType, operand } = this.getAssignOpInfo(e.op.type);
-    if (e.expr) { this.compileExpr(c, e.expr, subType); }
-    else { if (subType === TypeReq.Float) { const fi = this.addFloat(1); this.emit(c, this.getOpcodeValue(OpCode.LoadImmedFlt), fi); }
-    else this.emit(c, this.getOpcodeValue(OpCode.LoadImmedUInt), 1); }
+    this.compileExpr(c, e.expr, subType);
     const ident = (e.varExpr.vtype === VarType.Global ? '$' : '%') + e.varExpr.name.literal;
     if (e.varExpr.arrayIndex) {
       this.emit(c, this.getOpcodeValue(OpCode.LoadImmedIdent));
@@ -446,17 +553,9 @@ export class Compiler {
     if (e.arrayExpr) { this.compileExpr(c, e.arrayExpr, TypeReq.String); this.emit(c, this.getOpcodeValue(OpCode.AdvanceStr)); }
     this.compileExpr(c, e.objectExpr, TypeReq.String);
     this.emit(c, this.getOpcodeValue(OpCode.SetCurObject));
-    if (e.slotName) {
-      // Field access: obj.field
-      this.emit(c, this.getOpcodeValue(OpCode.SetCurField));
-      const fIp = this.context_ip(c); this.identTable.add(this.currentStringTable, e.slotName.literal, fIp);
-      if (e.arrayExpr) { this.emit(c, this.getOpcodeValue(OpCode.TerminateRewindStr)); this.emit(c, this.getOpcodeValue(OpCode.SetCurFieldArray)); }
-    } else if (e.arrayExpr) {
-      // Array access: expr[expr]
-      this.emit(c, this.getOpcodeValue(OpCode.SetCurField));
-      const fIp = this.context_ip(c); this.identTable.add(this.currentStringTable, '', fIp);
-      this.emit(c, this.getOpcodeValue(OpCode.SetCurFieldArray));
-    }
+    this.emit(c, this.getOpcodeValue(OpCode.SetCurField));
+    const fIp = this.context_ip(c); this.identTable.add(this.currentStringTable, e.slotName.literal, fIp);
+    if (e.arrayExpr) { this.emit(c, this.getOpcodeValue(OpCode.TerminateRewindStr)); this.emit(c, this.getOpcodeValue(OpCode.SetCurFieldArray)); }
     if (t === TypeReq.Int) this.emit(c, this.getOpcodeValue(OpCode.LoadFieldUInt));
     else if (t === TypeReq.Float) this.emit(c, this.getOpcodeValue(OpCode.LoadFieldFlt));
     else this.emit(c, this.getOpcodeValue(OpCode.LoadFieldStr));
@@ -465,42 +564,13 @@ export class Compiler {
   private compileSlotAssign(c: CompileContext, e: AST.SlotAssignExpr, t: TypeReq): void {
     this.compileExpr(c, e.expr, TypeReq.String);
     this.emit(c, this.getOpcodeValue(OpCode.AdvanceStr));
+    if (e.arrayExpr) { this.compileExpr(c, e.arrayExpr, TypeReq.String); this.emit(c, this.getOpcodeValue(OpCode.AdvanceStr)); }
     if (e.objectExpr) { this.compileExpr(c, e.objectExpr, TypeReq.String); this.emit(c, this.getOpcodeValue(OpCode.SetCurObject)); }
     else this.emit(c, this.getOpcodeValue(OpCode.SetCurObjectNew));
-    if (e.slotName) {
-      // Field assignment: obj.field = value
-      if (e.arrayExpr) { this.compileExpr(c, e.arrayExpr, TypeReq.String); this.emit(c, this.getOpcodeValue(OpCode.AdvanceStr)); }
-      this.emit(c, this.getOpcodeValue(OpCode.SetCurField));
-      const fIp = this.context_ip(c); this.identTable.add(this.currentStringTable, e.slotName.literal, fIp);
-      if (e.arrayExpr) { this.emit(c, this.getOpcodeValue(OpCode.TerminateRewindStr)); this.emit(c, this.getOpcodeValue(OpCode.SetCurFieldArray)); }
-      this.emit(c, this.getOpcodeValue(OpCode.TerminateRewindStr));
-      this.emit(c, this.getOpcodeValue(OpCode.SaveFieldStr));
-    } else if (e.arrayExpr) {
-      // Array element assignment: expr[expr] = value
-      // The array index is already compiled as part of the SlotAccessExpr
-      // We just need to set the field array and save
-      this.emit(c, this.getOpcodeValue(OpCode.SetCurFieldArray));
-      this.emit(c, this.getOpcodeValue(OpCode.SaveFieldStr));
-    }
-    if (t !== TypeReq.String) this.emit(c, this.getOpcodeValue(this.conversionOp(TypeReq.String, t)));
-  }
-
-  private compileSlotAssignOp(c: any, e: AST.SlotAssignOpExpr, t: TypeReq): void {
-    const { subType, operand } = this.getAssignOpInfo(e.op.type);
-    this.compileExpr(c, e.objectExpr, TypeReq.String);
-    this.emit(c, this.getOpcodeValue(OpCode.AdvanceStr));
-    if (e.arrayExpr) { this.compileExpr(c, e.arrayExpr, TypeReq.String); this.emit(c, this.getOpcodeValue(OpCode.AdvanceStr)); }
-    this.emit(c, this.getOpcodeValue(OpCode.SetCurObject));
+    this.emit(c, this.getOpcodeValue(OpCode.SetCurField));
     const fIp = this.context_ip(c); this.identTable.add(this.currentStringTable, e.slotName.literal, fIp);
     if (e.arrayExpr) { this.emit(c, this.getOpcodeValue(OpCode.TerminateRewindStr)); this.emit(c, this.getOpcodeValue(OpCode.SetCurFieldArray)); }
-    this.emit(c, this.getOpcodeValue(OpCode.LoadFieldStr));
-    if (e.expr) { this.compileExpr(c, e.expr, subType); }
-    else { if (subType === TypeReq.Float) { const fi = this.addFloat(1); this.emit(c, this.getOpcodeValue(OpCode.LoadImmedFlt), fi); } else this.emit(c, this.getOpcodeValue(OpCode.LoadImmedUInt), 1); }
-    this.emit(c, this.getOpcodeValue(operand));
-    this.emit(c, this.getOpcodeValue(OpCode.RewindStr));
-    this.emit(c, this.getOpcodeValue(OpCode.SetCurField));
-    const fIp2 = this.context_ip(c); this.identTable.add(this.currentStringTable, e.slotName.literal, fIp2);
-    if (e.arrayExpr) { this.emit(c, this.getOpcodeValue(OpCode.TerminateRewindStr)); this.emit(c, this.getOpcodeValue(OpCode.SetCurFieldArray)); }
+    this.emit(c, this.getOpcodeValue(OpCode.TerminateRewindStr));
     this.emit(c, this.getOpcodeValue(OpCode.SaveFieldStr));
     if (t !== TypeReq.String) this.emit(c, this.getOpcodeValue(this.conversionOp(TypeReq.String, t)));
   }
@@ -559,22 +629,19 @@ export class Compiler {
 
   // --- Helpers ---
   private emit(c: any, ...ops: number[]): void {
-    if (this.counting) { c.ip += ops.length; return; }
     const invalid = this.ops.invalid;
-    for (const op of ops) { c.codeStream[c.ip++] = op === invalid ? 13 : op; }
+    for (const op of ops) {
+      c.codeStream[c.ip++] = op === invalid ? this.getOpcodeValue(OpCode.Return) : op;
+    }
   }
 
-  private context_ip(c: any): number {
-    if (this.counting) { const ip = c.ip; c.ip++; return ip; }
-    const ip = c.ip; c.ip++; c.codeStream[ip] = 0; return ip;
-  }
+  private context_ip(c: CompileContext): number { const ip = c.ip; c.ip++; return ip; }
 
-  private addBreakLine(c: any, lineNo: number): void {
+  private addBreakLine(c: CompileContext, lineNo: number): void {
     if (this.inFunction) {
+      const line = this.breakLineCount * 2;
       this.breakLineCount++;
-      if (!this.counting && c.lineBreakPairs.length > 0) {
-        c.lineBreakPairs[this.breakLineCount * 2 - 2] = lineNo;
-      }
+      if (c.lineBreakPairs.length > 0) { c.lineBreakPairs[line] = lineNo; c.lineBreakPairs[line + 1] = c.ip; }
     }
   }
 
@@ -593,7 +660,7 @@ export class Compiler {
   }
 
   private getFloatBinOp(tt: TokenType): OpCode {
-    switch (tt) { case TokenType.Plus: return OpCode.Add; case TokenType.Minus: return OpCode.Sub; case TokenType.Multiply: return OpCode.Mul; case TokenType.Divide: return OpCode.Div; case TokenType.Modulus: return OpCode.Mod; default: if (!this.counting) console.log("WARN: getFloatBinOp unknown token:", tt); return OpCode.Invalid; }
+    switch (tt) { case TokenType.Plus: return OpCode.Add; case TokenType.Minus: return OpCode.Sub; case TokenType.Multiply: return OpCode.Mul; case TokenType.Divide: return OpCode.Div; default: return OpCode.Invalid; }
   }
 
   private getIntBinOp(tt: TokenType): OpCode {
@@ -623,7 +690,7 @@ export class Compiler {
       case TokenType.ShiftRightAssign: return { subType: TypeReq.Int, operand: OpCode.Shr };
       case TokenType.PlusPlus: return { subType: TypeReq.Float, operand: OpCode.Add };
       case TokenType.MinusMinus: return { subType: TypeReq.Float, operand: OpCode.Sub };
-      default: if (!this.counting) console.log("WARN: getAssignOpInfo unknown token:", tt); return { subType: TypeReq.Int, operand: OpCode.Invalid };
+      default: return { subType: TypeReq.Int, operand: OpCode.Invalid };
     }
   }
 
@@ -637,10 +704,6 @@ export class Compiler {
     if (src === TypeReq.Int && dest === TypeReq.Float) return OpCode.UIntToFlt;
     if (src === TypeReq.Int && dest === TypeReq.String) return OpCode.UIntToStr;
     if (src === TypeReq.Int && dest === TypeReq.None) return OpCode.UIntToNone;
-
-    // Same type: no conversion needed, but emit a placeholder that won't break
-    if (src === dest) return OpCode.Invalid; // will be replaced with NOP (0) by emit
-
     return OpCode.Invalid;
   }
 
@@ -684,14 +747,14 @@ export class Compiler {
     // 6. Code size
     writeU32(codeSize);
 
-    // 7. Line break count (decompiler reads lineBreaks*2 u32s)
+    // 7. Line break pair count (decompiler reads this as lineBreaks, then reads lineBreaks*2 values)
     writeU32(lineBreakPairCount / 2);
 
-    // 8. Code stream
+    // 8. Code stream — write using readOp-compatible format
     for (let i = 0; i < codeSize; i++) {
-      const op = context.codeStream[i];
-      if (op <= 0xFF) view.setUint8(pos++, op);
-      else { view.setUint8(pos++, 0xFF); view.setUint32(pos, op, true); pos += 4; }
+      const v = context.codeStream[i];
+      if (v <= 0xFF) view.setUint8(pos++, v);
+      else { view.setUint8(pos++, 0xFF); view.setUint32(pos, v, true); pos += 4; }
     }
 
     // 9. Line break pairs
