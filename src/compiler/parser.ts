@@ -24,16 +24,27 @@ export class Parser {
   parse(): AST.Stmt[] {
     const stmts: AST.Stmt[] = [];
     while (!this.isAtEnd()) {
-      const s = this.decl();
+      const s = this.decl(stmts);
       if (s) stmts.push(s);
     }
     return stmts;
   }
 
-  private decl(): AST.Stmt | null {
-    // Check for package
+  private decl(stmts: AST.Stmt[]): AST.Stmt | null {
+    // Check for package — parse all functions inside and push them directly
     if (this.match(TokenType.Package)) {
-      return this.packageDecl();
+      const name = this.consume(TokenType.Label, 'Expected package name');
+      this.consume(TokenType.LBracket, "Expected '{' after package name");
+      while (this.check(TokenType.Function)) {
+        const fn = this.functionDecl();
+        if (fn) {
+          fn.packageName = name;
+          stmts.push(fn);
+        }
+      }
+      this.consume(TokenType.RBracket, "Expected '}' after package body");
+      this.consume(TokenType.Semicolon, "Expected ';' after package block");
+      return null;
     }
     // Check for function
     const fn = this.functionDecl();
@@ -576,6 +587,15 @@ export class Parser {
       }
       expr = new AST.SlotAccessExpr(expr, arrAccess, label);
     }
+
+    // Handle direct array access: expr[expr]
+    while (this.check(TokenType.LeftSquareBracket)) {
+      this.advance();
+      const index = this.expression();
+      this.consume(TokenType.RightSquareBracket, "Expected ']' after array index");
+      expr = new AST.SlotAccessExpr(expr, index, null);
+    }
+
     return expr;
   }
 
