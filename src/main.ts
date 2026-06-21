@@ -291,7 +291,6 @@ function renderCodeOutput(text: string, isError: boolean, language?: string) {
   if (isError) {
     contentHtml = escapeHtml(text);
   } else if (language === "cpp" || !language) {
-    // Apply TorqueScript/C++ syntax highlighting
     contentHtml = lines.map(line => highlightLine(line)).join("\n");
   } else {
     contentHtml = escapeHtml(text);
@@ -305,65 +304,139 @@ function renderCodeOutput(text: string, isError: boolean, language?: string) {
   `;
 }
 
+// Token-based syntax highlighting — avoids nested spans
+const KEYWORDS = new Set([
+  'function','package','if','else','for','while','do','switch','case','default',
+  'break','continue','return','new','datablock','singleton','foreach','in','or',
+  'and','not','true','false','null','local','global','this','super','isObject',
+  'isDefined','strLen','strPos','strSub','strCat','trim','ltrim','rtrim',
+  'stripChars','firstWord','getWord','getWords','setWord','removeWord',
+  'getWordCount','findFirstFile','findNextFile','fileExt','fileName','filePath',
+  'exec','export','delete','schedule','echo','warn','error','activatePackage',
+  'deactivatePackage','isPackage','getPackageList','nameToID','getTag',
+  'getTaggedString','addTaggedString','containerBoxEmpty','containerCastRay',
+  'containerSearchNext','containerSearchCurrRadius','containerSearchCurrDist',
+  'vectorAdd','vectorSub','vectorCross','vectorDot','vectorLen','vectorDist',
+  'vectorNormalize','vectorScale','vectorLerp','MatrixCreate','MatrixMulVector',
+  'MatrixMulPoint','alxGetListenerf','alxListenerfv','alxGetSourcef','alxSourcefv',
+  'alxPlay','alxStop','alxStopAll','alxCreateSource','setRandomSeed','getRandom',
+  'getRandomF','spawnObject','createDataBlock','getName','getID','getClassName',
+  'save','loadJournal','playJournal','addComment','setModPaths','getModPaths',
+  'getBuildString','getSimTime','getRealTime','getTimeOfDay','setTimeOfDay',
+  'isFile','isWriteableFileName','fileOpenForRead','fileOpenForWrite',
+  'fileOpenForAppend','fileClose','fileReadLine','fileWriteLine','fileIsEOF',
+  'fileGetPosition','fileSetPosition',
+]);
+
 function highlightLine(line: string): string {
-  // Simple TorqueScript syntax highlighting
-  let result = escapeHtml(line);
+  const out: string[] = [];
+  let i = 0;
+  const len = line.length;
 
-  // Comments (// and /* */)
-  result = result.replace(/(\/\/.*$)/gm, '<span class="cm">$1</span>');
-  result = result.replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="cm">$1</span>');
+  while (i < len) {
+    // Whitespace
+    if (line[i] === ' ' || line[i] === '\t') {
+      let start = i;
+      while (i < len && (line[i] === ' ' || line[i] === '\t')) i++;
+      out.push(escapeHtml(line.slice(start, i)));
+      continue;
+    }
 
-  // Strings (double and single quoted)
-  result = result.replace(/("(?:[^"\\]|\\.)*")/g, '<span class="str">$1</span>');
-  result = result.replace(/('(?:[^'\\]|\\.)*')/g, '<span class="str">$1</span>');
+    // Line comment
+    if (line[i] === '/' && line[i + 1] === '/') {
+      out.push(`<span class="cm">${escapeHtml(line.slice(i))}</span>`);
+      break;
+    }
 
-  // Numbers
-  result = result.replace(/\b(\d+\.?\d*)\b/g, '<span class="num">$1</span>');
+    // Block comment start
+    if (line[i] === '/' && line[i + 1] === '*') {
+      let end = line.indexOf('*/', i + 2);
+      if (end === -1) { out.push(`<span class="cm">${escapeHtml(line.slice(i))}</span>`); break; }
+      out.push(`<span class="cm">${escapeHtml(line.slice(i, end + 2))}</span>`);
+      i = end + 2;
+      continue;
+    }
 
-  // Keywords
-  const keywords = [
-    'function', 'package', 'if', 'else', 'for', 'while', 'do', 'switch', 'case',
-    'default', 'break', 'continue', 'return', 'new', 'datablock', 'singleton',
-    'foreach', 'in', 'or', 'and', 'not', 'true', 'false', 'null',
-    'local', 'global', 'this', 'super', 'isObject', 'isDefined', 'strLen',
-    'strPos', 'strSub', 'strCat', 'trim', 'ltrim', 'rtrim', 'stripChars',
-    'firstWord', 'getWord', 'getWords', 'setWord', 'removeWord', 'getWordCount',
-    'findFirstFile', 'findNextFile', 'fileExt', 'fileName', 'filePath',
-    'exec', 'export', 'delete', 'schedule', 'echo', 'warn', 'error',
-    'activatePackage', 'deactivatePackage', 'isPackage', 'getPackageList',
-    'nameToID', 'getTag', 'getTaggedString', 'addTaggedString',
-    'containerBoxEmpty', 'containerCastRay', 'containerSearchNext',
-    'containerSearchCurrRadius', 'containerSearchCurrDist',
-    'vectorAdd', 'vectorSub', 'vectorCross', 'vectorDot', 'vectorLen',
-    'vectorDist', 'vectorNormalize', 'vectorScale', 'vectorLerp',
-    'MatrixCreate', 'MatrixMulVector', 'MatrixMulPoint',
-    'alxGetListenerf', 'alxListenerfv', 'alxGetSourcef', 'alxSourcefv',
-    'alxPlay', 'alxStop', 'alxStopAll', 'alxCreateSource',
-    'setRandomSeed', 'getRandom', 'getRandomF',
-    'spawnObject', 'createDataBlock', 'getName', 'getID', 'getClassName',
-    'save', 'loadJournal', 'playJournal', 'addComment',
-    'setModPaths', 'getModPaths', 'getBuildString', 'getSimTime',
-    'getRealTime', 'getTimeOfDay', 'setTimeOfDay',
-    'isFile', 'isWriteableFileName', 'fileOpenForRead', 'fileOpenForWrite',
-    'fileOpenForAppend', 'fileClose', 'fileReadLine', 'fileWriteLine',
-    'fileIsEOF', 'fileGetPosition', 'fileSetPosition',
-    'getWordCount', 'getFirstWord', 'getNextWord',
-  ];
+    // Double-quoted string
+    if (line[i] === '"') {
+      let j = i + 1;
+      while (j < len && line[j] !== '"') { if (line[j] === '\\') j++; j++; }
+      if (j < len) j++; // include closing quote
+      out.push(`<span class="str">${escapeHtml(line.slice(i, j))}</span>`);
+      i = j;
+      continue;
+    }
 
-  // Build keyword regex
-  const kwRegex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi');
-  result = result.replace(kwRegex, '<span class="kw">$1</span>');
+    // Single-quoted string
+    if (line[i] === "'") {
+      let j = i + 1;
+      while (j < len && line[j] !== "'") { if (line[j] === '\\') j++; j++; }
+      if (j < len) j++;
+      out.push(`<span class="str">${escapeHtml(line.slice(i, j))}</span>`);
+      i = j;
+      continue;
+    }
 
-  // Function calls (word followed by parenthesis)
-  result = result.replace(/\b([a-zA-Z_]\w*)(\s*\()/g, '<span class="fn">$1</span>$2');
+    // Number
+    if (/[0-9]/.test(line[i]) && (i === 0 || !/[a-zA-Z_$]/.test(line[i - 1]))) {
+      let j = i;
+      while (j < len && /[0-9.xXa-fA-F]/.test(line[j])) j++;
+      out.push(`<span class="num">${line.slice(i, j)}</span>`);
+      i = j;
+      continue;
+    }
 
-  // Variables ($x, %y, @z)
-  result = result.replace(/([\$%@][a-zA-Z_]\w*)/g, '<span class="var">$1</span>');
+    // Identifier or keyword
+    if (/[a-zA-Z_$]/.test(line[i])) {
+      let j = i;
+      while (j < len && /[a-zA-Z0-9_$]/.test(line[j])) j++;
+      const word = line.slice(i, j);
+      if (KEYWORDS.has(word.toLowerCase())) {
+        out.push(`<span class="kw">${word}</span>`);
+      } else if (j < len && line[j] === '(') {
+        out.push(`<span class="fn">${word}</span>`);
+      } else {
+        out.push(escapeHtml(word));
+      }
+      i = j;
+      continue;
+    }
 
-  // Operators
-  result = result.replace(/([=!<>]=?|[+\-*/%]=?|[&|]{2}?|::|\.\.|,|;|\{|\}|\[|\])/g, '<span class="op">$1</span>');
+    // Variable ($, %, @)
+    if (line[i] === '$' || line[i] === '%' || line[i] === '@') {
+      let j = i + 1;
+      while (j < len && /[a-zA-Z0-9_]/.test(line[j])) j++;
+      out.push(`<span class="var">${line.slice(i, j)}</span>`);
+      i = j;
+      continue;
+    }
 
-  return result;
+    // Operators and punctuation
+    if ('=<>!+-*/%&|.,;:{}[]()'.includes(line[i])) {
+      // Check for multi-char operators
+      const two = line.slice(i, i + 2);
+      if (['==','!=','<=','>=','+=','-=','*=','/=','%=','&&','||','::','..'].includes(two)) {
+        out.push(`<span class="op">${two}</span>`);
+        i += 2;
+        continue;
+      }
+      const three = line.slice(i, i + 3);
+      if (['>>=','<<='].includes(three)) {
+        out.push(`<span class="op">${three}</span>`);
+        i += 3;
+        continue;
+      }
+      out.push(`<span class="op">${line[i]}</span>`);
+      i++;
+      continue;
+    }
+
+    // Anything else
+    out.push(escapeHtml(line[i]));
+    i++;
+  }
+
+  return out.join('');
 }
 
 function escapeHtml(s: string): string {
@@ -372,7 +445,8 @@ function escapeHtml(s: string): string {
 
 // ─── Image output ───
 function renderImageOutput(bytes: Uint8Array, mime: string, name: string) {
-  const blob = new Blob([bytes], { type: mime });
+  // @ts-ignore BlobPart type compatibility
+  const blob = new Blob([bytes as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   panelBody.innerHTML = `
     <div class="image-output">
@@ -383,7 +457,8 @@ function renderImageOutput(bytes: Uint8Array, mime: string, name: string) {
 
 // ─── Audio output ───
 function renderAudioOutput(bytes: Uint8Array, mime: string, name: string) {
-  const blob = new Blob([bytes], { type: mime });
+  // @ts-ignore BlobPart type compatibility
+  const blob = new Blob([bytes as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   panelBody.innerHTML = `
     <div class="audio-output">
