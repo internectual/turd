@@ -245,7 +245,6 @@ export class Ops {
   readonly OP_INVALID = 0x53;
 
   protected _tags: Map<number, OpcodeTag> = new Map();
-  get tags(): Map<number, OpcodeTag> { return this._tags; }
 
   protected _invalid: number;
 
@@ -562,8 +561,7 @@ export class FileLoader {
       let count = this.reader.readUInt();
       while (count-- > 0) {
         const ip = this.reader.readUInt();
-        // Store ident table entries for later filtering
-        // (patching is done in decompile() after ops is available)
+        data.code[ip] = index;
         data.identifierTable.set(ip, index);
       }
     }
@@ -1946,22 +1944,6 @@ export function decompile(bytes: Uint8Array): DecompileResult {
     const version = readDsoVersion(bytes);
     const opsMap: OpsMap = VERSION_OPS[version] || OPS_MAPS.TGE10;
     const ops = new Ops(opsMap);
-
-    // Patch ident table, but only for positions that are actually LoadImmedIdent operands
-    // This prevents corrupting opcodes or other operands that share the same position
-    for (const [ip, strIdx] of data.identifierTable) {
-      if (ip > 0) {
-        const prevByte = data.code[ip - 1];
-        const prevTag = ops.tags.get(prevByte);
-        if (prevTag === OpcodeTag.OP_LOADIMMED_IDENT) {
-          data.code[ip] = strIdx;
-        } else {
-          // Not a LoadImmedIdent operand — remove from ident table
-          data.identifierTable.delete(ip);
-        }
-      }
-    }
-
     const reader = new BytecodeReader(data, ops);
     const disasm = disassemble(reader);
     const cf = analyzeControlFlow(disasm);
