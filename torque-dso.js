@@ -517,7 +517,7 @@ var Parser = class {
         const s = this.decl();
         if (s) stmts.push(s);
       } catch (e) {
-        while (!this.isAtEnd() && !this.check(64 /* Semicolon */) && !this.check(62 /* RBracket */) && !this.check(60 /* RParen */))
+        while (!this.isAtEnd() && !this.check(62 /* RBracket */) && !this.check(2 /* Function */) && !this.check(75 /* Eof */))
           this.advance();
         if (!this.isAtEnd()) this.advance();
       }

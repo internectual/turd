@@ -28,10 +28,10 @@ export class Parser {
         const s = this.decl();
         if (s) stmts.push(s);
       } catch (e) {
-        // Skip to next semicolon or closing brace for error recovery
-        while (!this.isAtEnd() && !this.check(TokenType.Semicolon) && !this.check(TokenType.RBracket) && !this.check(TokenType.RParen))
+        // Skip to next 'function' keyword or closing brace for fast error recovery
+        while (!this.isAtEnd() && !this.check(TokenType.RBracket) && !this.check(TokenType.Function) && !this.check(TokenType.Eof))
           this.advance();
-        if (!this.isAtEnd()) this.advance(); // consume the terminator
+        if (!this.isAtEnd()) this.advance();
       }
     }
     return stmts;
