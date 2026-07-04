@@ -24,8 +24,15 @@ export class Parser {
   parse(): AST.Stmt[] {
     const stmts: AST.Stmt[] = [];
     while (!this.isAtEnd()) {
-      const s = this.decl();
-      if (s) stmts.push(s);
+      try {
+        const s = this.decl();
+        if (s) stmts.push(s);
+      } catch (e) {
+        // Skip to next semicolon or closing brace for error recovery
+        while (!this.isAtEnd() && !this.check(TokenType.Semicolon) && !this.check(TokenType.RBracket) && !this.check(TokenType.RParen))
+          this.advance();
+        if (!this.isAtEnd()) this.advance(); // consume the terminator
+      }
     }
     return stmts;
   }
@@ -54,7 +61,7 @@ export class Parser {
       }
     }
     this.consume(TokenType.RBracket, "Expected '}' after package body");
-    this.consume(TokenType.Semicolon, "Expected ';' after package block");
+    this.tryConsume(TokenType.Semicolon);
     return new AST.PackageDeclStmt(name, fns);
   }
 
@@ -182,7 +189,7 @@ export class Parser {
     this.advance();
     this.consume(TokenType.LParen, "Expected '(' after if");
     const cond = this.expression();
-    this.consume(TokenType.RParen, "Expected ')' after condition");
+    this.tryConsume(TokenType.RParen);
     const body = this.blockStatements();
     let elseBody: AST.Stmt[] | null = null;
     if (this.match(TokenType.Else)) {
@@ -196,7 +203,7 @@ export class Parser {
     this.advance();
     this.consume(TokenType.LParen, "Expected '(' after while");
     const cond = this.expression();
-    this.consume(TokenType.RParen, "Expected ')' after condition");
+    this.tryConsume(TokenType.RParen);
     const body = this.blockStatements();
     return new AST.LoopStmt(line, cond, null, null, body);
   }
@@ -211,15 +218,15 @@ export class Parser {
       init = this.stmtExpr();
       if (!init) init = this.expression();
     }
-    this.consume(TokenType.Semicolon, "Expected ';' after for init");
+    this.tryConsume(TokenType.Semicolon);
     const cond = this.expression();
-    this.consume(TokenType.Semicolon, "Expected ';' after for condition");
+    this.tryConsume(TokenType.Semicolon);
     let end: AST.Expr | null = null;
     if (!this.check(TokenType.RParen)) {
       end = this.stmtExpr();
       if (!end) end = this.expression();
     }
-    this.consume(TokenType.RParen, "Expected ')' after for increment");
+    this.tryConsume(TokenType.RParen);
     const body = this.blockStatements();
     return new AST.LoopStmt(line, cond, init, end, body);
   }
@@ -299,7 +306,7 @@ export class Parser {
       else break;
     }
     this.consume(TokenType.RBracket, "Expected '}' after datablock body");
-    this.consume(TokenType.Semicolon, "Expected ';' after datablock body");
+    this.tryConsume(TokenType.Semicolon);
     const result = new AST.ObjectDeclExpr(
       new AST.ConstantExpr(className), parentName, new AST.ConstantExpr(name), [], slots, [], true
     );
@@ -316,7 +323,7 @@ export class Parser {
       }
       this.consume(TokenType.Assign, "Expected '=' after slot name");
       const expr = this.expression();
-      this.consume(TokenType.Semicolon, "Expected ';' after slot assignment");
+      this.tryConsume(TokenType.Semicolon);
       return new AST.SlotAssignExpr(null, arrayIdx, slotName, expr);
     }
     return null;
@@ -335,7 +342,7 @@ export class Parser {
   private expressionStmt(): AST.Stmt | null {
     const expr = this.stmtExpr();
     if (expr) {
-      this.consume(TokenType.Semicolon, "Expected ';' after expression");
+      this.tryConsume(TokenType.Semicolon);
     }
     return expr;
   }
@@ -795,6 +802,12 @@ export class Parser {
     throw new SyntaxError(message, this.peek());
   }
 
+  // Optional consume — silently skip if token not present (for lenient T2 parsing)
+  private tryConsume(type: TokenType): boolean {
+    if (this.check(type)) { this.advance(); return true; }
+    return false;
+  }
+
   private objectDecl(className: Token, structDecl: boolean, consumeTrailingSemicolon: boolean): AST.ObjectDeclExpr {
     let objectNameExpr: AST.Expr = new AST.ConstantExpr(className);
     let parentObject: Token | null = null;
@@ -833,7 +846,7 @@ export class Parser {
     }
 
     if (consumeTrailingSemicolon) {
-      this.consume(TokenType.Semicolon, "Expected ';' after nested object");
+      this.tryConsume(TokenType.Semicolon);
     }
 
     return new AST.ObjectDeclExpr(
