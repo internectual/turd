@@ -512,14 +512,24 @@ var Parser = class {
   }
   parse() {
     const stmts = [];
+    let consecutiveErrors = 0;
     while (!this.isAtEnd()) {
       try {
         const s = this.decl();
         if (s) stmts.push(s);
+        consecutiveErrors = 0;
       } catch (e) {
-        while (!this.isAtEnd()) {
-          if (this.check(62 /* RBracket */) || this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
-          this.advance();
+        consecutiveErrors++;
+        if (consecutiveErrors > 5) {
+          while (!this.isAtEnd()) {
+            if (this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
+            this.advance();
+          }
+        } else {
+          while (!this.isAtEnd()) {
+            if (this.check(62 /* RBracket */) || this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
+            this.advance();
+          }
         }
         if (!this.isAtEnd()) this.advance();
       }

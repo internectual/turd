@@ -23,16 +23,28 @@ export class Parser {
 
   parse(): AST.Stmt[] {
     const stmts: AST.Stmt[] = [];
+    let consecutiveErrors = 0;
     while (!this.isAtEnd()) {
       try {
         const s = this.decl();
         if (s) stmts.push(s);
+        consecutiveErrors = 0;
       } catch (e) {
+        consecutiveErrors++;
         // Fast error recovery: skip to next function/package/} boundary
-        while (!this.isAtEnd()) {
-          if (this.check(TokenType.RBracket) || this.check(TokenType.Function) ||
-              this.check(TokenType.Package) || this.check(TokenType.Eof)) break;
-          this.advance();
+        if (consecutiveErrors > 5) {
+          // Many consecutive errors — skip to next function keyword directly
+          while (!this.isAtEnd()) {
+            if (this.check(TokenType.Function) || this.check(TokenType.Package) ||
+                this.check(TokenType.Eof)) break;
+            this.advance();
+          }
+        } else {
+          while (!this.isAtEnd()) {
+            if (this.check(TokenType.RBracket) || this.check(TokenType.Function) ||
+                this.check(TokenType.Package) || this.check(TokenType.Eof)) break;
+            this.advance();
+          }
         }
         if (!this.isAtEnd()) this.advance();
       }
