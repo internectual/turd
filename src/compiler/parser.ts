@@ -351,49 +351,58 @@ export class Parser {
   }
 
   private stmtExpr(): AST.Expr | null {
-    const expr = this.expression();
+    let expr = this.expression();
     if (!expr) return null;
 
-    // Check for slot access with dot
-    if (this.match(TokenType.Dot)) {
-      const label = this.consume(TokenType.Label, 'Expected label after .');
-      let arrAccess: AST.Expr | null = null;
-      if (this.match(TokenType.LeftSquareBracket)) {
-        arrAccess = this.parseArrayIndex();
-        this.consume(TokenType.RightSquareBracket, "Expected ']' after array index");
-      }
-      if (this.match(TokenType.Assign)) {
-        const rexpr = this.expression();
-        return new AST.SlotAssignExpr(expr, arrAccess, label, rexpr);
-      }
-      if (this.check(TokenType.PlusPlus) || this.check(TokenType.MinusMinus)) {
-        const op = this.advance();
-        return new AST.ParenthesisExpr(new AST.SlotAssignOpExpr(expr, arrAccess, label, null, op));
-      }
-      const assignOpTypes = [
-        TokenType.PlusAssign, TokenType.MinusAssign, TokenType.MultiplyAssign,
-        TokenType.DivideAssign, TokenType.ModulusAssign, TokenType.AndAssign,
-        TokenType.OrAssign, TokenType.XorAssign, TokenType.ShiftLeftAssign,
-        TokenType.ShiftRightAssign,
-      ];
-      if (assignOpTypes.includes(this.peek().type)) {
-        const op = this.advance();
-        const rexpr = this.expression();
-        return new AST.SlotAssignOpExpr(expr, arrAccess, label, rexpr, op);
-      }
-      if (this.match(TokenType.LParen)) {
-        const args: AST.Expr[] = [expr];
-        if (!this.check(TokenType.RParen)) {
-          args.push(this.expression());
-          while (this.match(TokenType.Comma)) {
-            args.push(this.expression());
-          }
+    // Support chained postfix operations: obj.method1().method2(), var[].field, etc.
+    let handled = true;
+    while (handled) {
+      handled = false;
+
+      // Check for slot access, method call, or assignment via dot
+      if (this.match(TokenType.Dot)) {
+        handled = true;
+        const label = this.consume(TokenType.Label, 'Expected label after .');
+        let arrAccess: AST.Expr | null = null;
+        if (this.match(TokenType.LeftSquareBracket)) {
+          arrAccess = this.parseArrayIndex();
+          this.consume(TokenType.RightSquareBracket, "Expected ']' after array index");
         }
-        this.consume(TokenType.RParen, "Expected ')' after arguments");
-        return new AST.FuncCallExpr(label, null, args, FuncCallType.MethodCall);
+        if (this.match(TokenType.Assign)) {
+          const rexpr = this.expression();
+          return new AST.SlotAssignExpr(expr, arrAccess, label, rexpr);
+        }
+        if (this.check(TokenType.PlusPlus) || this.check(TokenType.MinusMinus)) {
+          const op = this.advance();
+          return new AST.ParenthesisExpr(new AST.SlotAssignOpExpr(expr, arrAccess, label, null, op));
+        }
+        const assignOpTypes = [
+          TokenType.PlusAssign, TokenType.MinusAssign, TokenType.MultiplyAssign,
+          TokenType.DivideAssign, TokenType.ModulusAssign, TokenType.AndAssign,
+          TokenType.OrAssign, TokenType.XorAssign, TokenType.ShiftLeftAssign,
+          TokenType.ShiftRightAssign,
+        ];
+        if (assignOpTypes.includes(this.peek().type)) {
+          const op = this.advance();
+          const rexpr = this.expression();
+          return new AST.SlotAssignOpExpr(expr, arrAccess, label, rexpr, op);
+        }
+        if (this.match(TokenType.LParen)) {
+          const args: AST.Expr[] = [expr];
+          if (!this.check(TokenType.RParen)) {
+            args.push(this.expression());
+            while (this.match(TokenType.Comma)) {
+              args.push(this.expression());
+            }
+          }
+          this.consume(TokenType.RParen, "Expected ')' after arguments");
+          expr = new AST.FuncCallExpr(label, null, args, FuncCallType.MethodCall);
+          continue; // allow more chaining
+        }
+        // Not an assignment, just slot access
+        expr = new AST.SlotAccessExpr(expr, arrAccess, label);
+        continue;
       }
-      // Not an assignment, backtrack
-      return expr;
     }
 
     // Check for variable assignment
@@ -713,8 +722,8 @@ export class Parser {
       expr = new AST.SlotAccessExpr(expr, arrAccess, label);
     }
 
-    // Handle method calls on objects: expr.field(args)
-    if (expr instanceof AST.SlotAccessExpr && expr.slotName !== null && this.check(TokenType.LParen)) {
+    // Handle chained method calls: expr.method1().method2()
+    while (expr instanceof AST.SlotAccessExpr && expr.slotName !== null && this.check(TokenType.LParen)) {
       this.advance();
       const args: AST.Expr[] = [];
       if (!this.check(TokenType.RParen)) {
@@ -725,7 +734,17 @@ export class Parser {
       }
       this.consume(TokenType.RParen, "Expected ')' after arguments");
       expr = new AST.FuncCallExpr(expr.slotName, null, args, FuncCallType.MethodCall, expr.objectExpr);
-      return expr;
+      // After method call, check for more dot chains (chained method calls)
+      if (this.check(TokenType.Dot)) {
+        this.advance();
+        const label2 = this.consume(TokenType.Label, 'Expected label after .');
+        let arrAccess2: AST.Expr | null = null;
+        if (this.match(TokenType.LeftSquareBracket)) {
+          arrAccess2 = this.parseArrayIndex();
+          this.consume(TokenType.RightSquareBracket, "Expected ']'");
+        }
+        expr = new AST.SlotAccessExpr(expr, arrAccess2, label2);
+      }
     }
 
     return expr;

@@ -811,7 +811,7 @@ var Parser = class {
     let expr = this.expression();
     if (!expr) return null;
     let handled = true;
-    while (handled) {
+    let _lc=0; while (handled) { if (++_lc>100) { console.error("LOOP in stmtExpr"); break; }
       handled = false;
       if (this.match(70 /* Dot */)) {
         handled = true;
