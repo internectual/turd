@@ -520,14 +520,14 @@ var Parser = class {
         consecutiveErrors = 0;
       } catch (e) {
         consecutiveErrors++;
-        if (consecutiveErrors > 5) {
+        if (consecutiveErrors > 3) {
           while (!this.isAtEnd()) {
-            if (this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
+            if (this.check(2 /* Function */) || this.check(75 /* Eof */)) break;
             this.advance();
           }
         } else {
           while (!this.isAtEnd()) {
-            if (this.check(62 /* RBracket */) || this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
+            if (this.check(62 /* RBracket */) || this.check(2 /* Function */) || this.check(75 /* Eof */)) break;
             this.advance();
           }
         }

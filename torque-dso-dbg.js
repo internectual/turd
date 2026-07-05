@@ -1,4 +1,4 @@
-// src/compiler/scanner.ts
+let _pc2=0;// src/compiler/scanner.ts
 function makeToken(type, lexeme, literal, line, position) {
   return { type, lexeme, literal, line, position };
 }
@@ -512,14 +512,24 @@ var Parser = class {
   }
   parse() {
     const stmts = [];
+    let consecutiveErrors = 0;
     while (!this.isAtEnd()) {
       try {
         const s = this.decl();
         if (s) stmts.push(s);
+        consecutiveErrors = 0;
       } catch (e) {
-        while (!this.isAtEnd()) {
-          if (this.check(62 /* RBracket */) || this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
-          this.advance();
+        consecutiveErrors++;
+        if (consecutiveErrors > 5) {
+          while (!this.isAtEnd()) {
+            if (this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
+            this.advance();
+          }
+        } else {
+          while (!this.isAtEnd()) {
+            if (this.check(62 /* RBracket */) || this.check(2 /* Function */) || this.check(1 /* Package */) || this.check(75 /* Eof */)) break;
+            this.advance();
+          }
         }
         if (!this.isAtEnd()) this.advance();
       }
@@ -811,7 +821,7 @@ var Parser = class {
     let expr = this.expression();
     if (!expr) return null;
     let handled = true;
-    let _lc=0; while (handled) { if (++_lc>100) { console.error("LOOP in stmtExpr"); break; }
+    while (handled) {
       handled = false;
       if (this.match(70 /* Dot */)) {
         handled = true;
@@ -2120,7 +2130,7 @@ var Compiler = class {
   // --- Precompile pass ---
   precompileBlock(stmts, loopCount) {
     let sum = 0;
-    for (const s of stmts) sum += this.precompileStmt(s, loopCount);
+    for (const s of stmts) { sum += this.precompileStmt(s, loopCount); if(++_pc2%1000==0)console.error("PRECOMPILE "+_pc2); }
     return sum;
   }
   precompileStmt(stmt, loopCount) {

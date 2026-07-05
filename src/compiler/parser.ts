@@ -31,18 +31,16 @@ export class Parser {
         consecutiveErrors = 0;
       } catch (e) {
         consecutiveErrors++;
-        // Fast error recovery: skip to next function/package/} boundary
-        if (consecutiveErrors > 5) {
-          // Many consecutive errors — skip to next function keyword directly
+        // Fast error recovery: after 3 consecutive errors, skip directly to next Function
+        if (consecutiveErrors > 3) {
           while (!this.isAtEnd()) {
-            if (this.check(TokenType.Function) || this.check(TokenType.Package) ||
-                this.check(TokenType.Eof)) break;
+            if (this.check(TokenType.Function) || this.check(TokenType.Eof)) break;
             this.advance();
           }
         } else {
           while (!this.isAtEnd()) {
             if (this.check(TokenType.RBracket) || this.check(TokenType.Function) ||
-                this.check(TokenType.Package) || this.check(TokenType.Eof)) break;
+                this.check(TokenType.Eof)) break;
             this.advance();
           }
         }
