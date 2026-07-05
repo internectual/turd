@@ -28,9 +28,12 @@ export class Parser {
         const s = this.decl();
         if (s) stmts.push(s);
       } catch (e) {
-        // Skip to next 'function' keyword or closing brace for fast error recovery
-        while (!this.isAtEnd() && !this.check(TokenType.RBracket) && !this.check(TokenType.Function) && !this.check(TokenType.Eof))
+        // Fast error recovery: skip to next function/package/} boundary
+        while (!this.isAtEnd()) {
+          if (this.check(TokenType.RBracket) || this.check(TokenType.Function) ||
+              this.check(TokenType.Package) || this.check(TokenType.Eof)) break;
           this.advance();
+        }
         if (!this.isAtEnd()) this.advance();
       }
     }
