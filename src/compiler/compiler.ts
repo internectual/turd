@@ -172,7 +172,6 @@ export class Compiler {
     const codeSize = this.precompileBlock(stmts, 0) + 1;
     const breakCount = this.breakLineCount;
     const lineBreakPairCount = breakCount * 2;
-    // Allocate with large multiplier to avoid reallocation
     const context = new CompileContext(codeSize * 4 + 1024, lineBreakPairCount * 2 + 1024);
 
     this.breakLineCount = 0;
