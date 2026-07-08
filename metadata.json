@@ -1,6 +1,0 @@
-{
-  "name": "TURD",
-  "description": "A web-based decompiler for TorqueScript .dso bytecode files and zip archives, running entirely in the browser.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
