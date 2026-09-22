@@ -80,11 +80,11 @@ export class Parser {
 
   private functionDecl(): AST.FunctionDeclStmt | null {
     if (!this.match(TokenType.Function)) return null;
-    const fnName = this.consume(TokenType.Label, 'Expected function name');
+    let fnName = this.consume(TokenType.Label, 'Expected function name');
     let namespace: Token | null = null;
     if (this.match(TokenType.DoubleColon)) {
       namespace = fnName;
-      this.consume(TokenType.Label, 'Expected function name after ::');
+      fnName = this.consume(TokenType.Label, 'Expected function name after ::');
     }
     this.consume(TokenType.LParen, "Expected '(' after function name");
     const args: AST.VarExpr[] = [];
