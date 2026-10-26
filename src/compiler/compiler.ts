@@ -137,7 +137,7 @@ export class Compiler {
     this.currentStringTable = this.globalStringTable;
     this.currentFloatTable = this.globalFloatTable;
     const versionMap: Record<string, number> = {
-      TGE10: 33, Tribes2: 174, TGE14: 36, Constructor: 38,
+      TGE10: 33, Tribes2: 174, Tribes2V24834: 140, TGE14: 36, Constructor: 38,
       TFD: 33, BlocklandV1: 90, BlocklandV20: 190, BlocklandV21: 210,
     };
     this.dsoVersion = versionMap[targetId] || 33;

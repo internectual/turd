@@ -245,6 +245,7 @@ const blv21Ops = buildOps({
 export const OPS_MAPS: Record<string, OpsMap> = {
   TGE10: tge10Ops,
   Tribes2: tge10Ops,
+  Tribes2V24834: tge10Ops,
   TGE14: tge14Ops,
   Constructor: constructorOps,
   TFD: tfdOps,
