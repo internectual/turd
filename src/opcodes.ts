@@ -51,6 +51,13 @@ const tge10Ops = buildOps({
   OP_UNUSED1: 0x02, OP_UNUSED2: 0x03, OP_UNUSED3: 0x48,
 }, 0x53);
 
+// Tribes 2 Demo GUI DSOs (versions 122/123 and some v140 archives) retain
+// the TGE 1.0 opcode assignments but use 0x53 for OP_FUNC_DECL instead of 0x00.
+export const TRIBES2_DEMO_OPS = buildOps({
+  ...tge10Ops.values,
+  OP_FUNC_DECL: 0x53,
+}, 0x54);
+
 // TGE 1.4
 const tge14Ops = buildOps({
   OP_FUNC_DECL: 0x00, OP_CREATE_OBJECT: 0x01, OP_ADD_OBJECT: 0x02, OP_END_OBJECT: 0x03,
@@ -245,6 +252,9 @@ const blv21Ops = buildOps({
 export const OPS_MAPS: Record<string, OpsMap> = {
   TGE10: tge10Ops,
   Tribes2: tge10Ops,
+  Tribes2DemoV122: TRIBES2_DEMO_OPS,
+  Tribes2DemoV123: TRIBES2_DEMO_OPS,
+  Tribes2DemoV140: TRIBES2_DEMO_OPS,
   Tribes2V24834: tge10Ops,
   TGE14: tge14Ops,
   Constructor: constructorOps,

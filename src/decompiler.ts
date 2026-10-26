@@ -2,7 +2,8 @@
  * TorqueScript DSO decompiler — TypeScript port of Elletra/dso-sharp.
  *
  * Supports DSO file version 33 (TGE 1.0–1.3 / The Forgettable Dungeon),
- * versions 140 (Tribes 2 build 24834) and 174 (Tribes 2 build 25034)
+ * versions 122/123 (Tribes 2 Demo GUI), 140 (Tribes 2 build 24834),
+ * and 174 (Tribes 2 build 25034)
  * end-to-end: bytecode reader → control-flow analyzer
  * → AST builder → TorqueScript code generator. Other versions (TGE 1.4,
  * Torque Constructor, Blockland v1/v20/v21) currently fall back to header
@@ -11,7 +12,7 @@
  * Mirrors dso-sharp's class structure closely to make porting fixes obvious.
  */
 
-import { OPS_MAPS, type OpsMap } from "./opcodes";
+import { OPS_MAPS, TRIBES2_DEMO_OPS, type OpsMap } from "./opcodes";
 
 /* ────────────────────────────────────────────────────────────────────────── *
  * String escape helper (Util/String.cs)
@@ -1924,7 +1925,9 @@ export interface DecompileResult {
 
 const VERSION_OPS: Record<number, OpsMap> = {
   33: OPS_MAPS.TGE10,
-  // Tribes 2 build 24834 uses the same opcode ordering as TGE 1.0 / v25034.
+  122: TRIBES2_DEMO_OPS,
+  123: TRIBES2_DEMO_OPS,
+  // Most v140 files use the TGE 1.0 / v25034 opcode ordering.
   140: OPS_MAPS.Tribes2,
   174: OPS_MAPS.Tribes2,
   36: OPS_MAPS.TGE14,
@@ -1933,6 +1936,13 @@ const VERSION_OPS: Record<number, OpsMap> = {
   190: OPS_MAPS.BlocklandV20,
   210: OPS_MAPS.BlocklandV21,
 };
+
+function opsMapsForVersion(version: number | null): OpsMap[] {
+  const primary = (version !== null ? VERSION_OPS[version] : null) || OPS_MAPS.TGE10;
+  // DSO v140 appears with both the normal Tribes 2 mapping and the Demo
+  // compiler mapping. Try the latter only if decoding with the normal map fails.
+  return version === 140 ? [primary, TRIBES2_DEMO_OPS] : [primary];
+}
 
 function readDsoVersion(bytes: Uint8Array): number | null {
   if (bytes.length < 4) return null;
@@ -1945,19 +1955,26 @@ export function decompile(bytes: Uint8Array): DecompileResult {
     const loader = new FileLoader();
     const data = loader.load(bytes);
     const version = readDsoVersion(bytes);
-    const opsMap: OpsMap = (version !== null ? VERSION_OPS[version] : null) || OPS_MAPS.TGE10;
-    const ops = new Ops(opsMap);
-    const reader = new BytecodeReader(data, ops);
-    const disasm = disassemble(reader);
-    const cf = analyzeControlFlow(disasm);
-    const builder = new Builder();
-    const nodes = builder.build(cf, disasm);
-    const source = generateCode(nodes);
-    return {
-      ok: true,
-      source,
-      stats: { instructionCount: disasm.list.length, codeSize: data.code.length },
-    };
+    let lastError: unknown;
+    for (const opsMap of opsMapsForVersion(version)) {
+      try {
+        const ops = new Ops(opsMap);
+        const reader = new BytecodeReader(data, ops);
+        const disasm = disassemble(reader);
+        const cf = analyzeControlFlow(disasm);
+        const builder = new Builder();
+        const nodes = builder.build(cf, disasm);
+        const source = generateCode(nodes);
+        return {
+          ok: true,
+          source,
+          stats: { instructionCount: disasm.list.length, codeSize: data.code.length },
+        };
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError;
   } catch (e) {
     return {
       ok: false,
@@ -2041,20 +2058,27 @@ export function disassembleText(bytes: Uint8Array): DisassembleTextResult {
     const loader = new FileLoader();
     const data = loader.load(bytes);
     const version = readDsoVersion(bytes);
-    const opsMap: OpsMap = (version !== null ? VERSION_OPS[version] : null) || OPS_MAPS.TGE10;
-    const ops = new Ops(opsMap);
-    const reader = new BytecodeReader(data, ops);
-    const disasm = disassemble(reader);
-    const lines: string[] = [];
-    lines.push(`; DSO version ${data.version}`);
-    lines.push(`; ${disasm.list.length} instructions, ${data.code.length} ops`);
-    lines.push(`; global strings: ${data.globalStringTable.entries.size}, function strings: ${data.functionStringTable.entries.size}`);
-    lines.push(`; global floats: ${data.globalFloatTable.values.length}, function floats: ${data.functionFloatTable.values.length}`);
-    lines.push("");
-    for (const inst of disasm.list) {
-      lines.push(formatInstruction(inst));
+    let lastError: unknown;
+    for (const opsMap of opsMapsForVersion(version)) {
+      try {
+        const ops = new Ops(opsMap);
+        const reader = new BytecodeReader(data, ops);
+        const disasm = disassemble(reader);
+        const lines: string[] = [];
+        lines.push(`; DSO version ${data.version}`);
+        lines.push(`; ${disasm.list.length} instructions, ${data.code.length} ops`);
+        lines.push(`; global strings: ${data.globalStringTable.entries.size}, function strings: ${data.functionStringTable.entries.size}`);
+        lines.push(`; global floats: ${data.globalFloatTable.values.length}, function floats: ${data.functionFloatTable.values.length}`);
+        lines.push("");
+        for (const inst of disasm.list) {
+          lines.push(formatInstruction(inst));
+        }
+        return { ok: true, text: lines.join("\n") };
+      } catch (e) {
+        lastError = e;
+      }
     }
-    return { ok: true, text: lines.join("\n") };
+    throw lastError;
   } catch (e) {
     return {
       ok: false,

@@ -31,6 +31,8 @@ const VERSION_MAP: Record<number, GameIdentifier[]> = {
   33: ["TGE10", "ForgettableDungeon"], // TGE10 and TFD share version 33
   36: ["TGE14"],
   38: ["TCON"],
+  122: ["Tribes2"], // Tribes 2 Demo legacy GUI DSOs
+  123: ["Tribes2"], // Tribes 2 Demo legacy GUI DSOs
   140: ["Tribes2"], // Tribes 2 build 24834
   174: ["Tribes2"],
   90: ["BlocklandV1"],
