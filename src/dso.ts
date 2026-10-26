@@ -31,6 +31,7 @@ const VERSION_MAP: Record<number, GameIdentifier[]> = {
   33: ["TGE10", "ForgettableDungeon"], // TGE10 and TFD share version 33
   36: ["TGE14"],
   38: ["TCON"],
+  140: ["Tribes2"], // Tribes 2 build 24834
   174: ["Tribes2"],
   90: ["BlocklandV1"],
   190: ["BlocklandV20"],
@@ -315,4 +316,3 @@ export function buildDisassembly(bytes: Uint8Array | null): { ok: boolean; text:
   if (out.ok && out.text) return { ok: true, text: out.text };
   return { ok: false, text: `; Disassembly failed: ${out.error ?? "unknown error"}` };
 }
-

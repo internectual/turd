@@ -1,8 +1,9 @@
 /**
  * TorqueScript DSO decompiler — TypeScript port of Elletra/dso-sharp.
  *
- * Supports DSO file version 33 (TGE 1.0–1.3 / The Forgettable Dungeon) and
- * version 174 (Tribes 2) end-to-end: bytecode reader → control-flow analyzer
+ * Supports DSO file version 33 (TGE 1.0–1.3 / The Forgettable Dungeon),
+ * versions 140 (Tribes 2 build 24834) and 174 (Tribes 2 build 25034)
+ * end-to-end: bytecode reader → control-flow analyzer
  * → AST builder → TorqueScript code generator. Other versions (TGE 1.4,
  * Torque Constructor, Blockland v1/v20/v21) currently fall back to header
  * detection only.
@@ -1923,6 +1924,8 @@ export interface DecompileResult {
 
 const VERSION_OPS: Record<number, OpsMap> = {
   33: OPS_MAPS.TGE10,
+  // Tribes 2 build 24834 uses the same opcode ordering as TGE 1.0 / v25034.
+  140: OPS_MAPS.Tribes2,
   174: OPS_MAPS.Tribes2,
   36: OPS_MAPS.TGE14,
   38: OPS_MAPS.Constructor,
@@ -2059,4 +2062,3 @@ export function disassembleText(bytes: Uint8Array): DisassembleTextResult {
     };
   }
 }
-
